@@ -1,0 +1,16 @@
+/target/
+/five_point_result/
+/yi_five_point_result/
+/i25308f/
+/i25308f_frinZ_c_all.txt
+/output.tsv
+/yi_five_point.cfg
+/yi_five_point.py
+/png_compress.rs
+
+/assets/icons/fivepoints_icon.svg
+/assets/icons/fivepoints_icon_16.png
+/assets/icons/fivepoints_icon_32.png
+/assets/icons/fivepoints_icon_48.png
+/assets/icons/fivepoints_icon_64.png
+/assets/icons/fivepoints_icon_128.png

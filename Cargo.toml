@@ -1,0 +1,18 @@
+[package]
+name = "fivepoints"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+plotters = "0.3"
+image = { version = "0.24", default-features = false, features = ["png"] }
+png = "0.17"
+imagequant = "4.4.1"
+
+[package.metadata.wix]
+name = "FivePointsCalc"
+manufacturer = "Akimoto"
+path-guid = "7c6083f3-79fc-442e-991c-485d5bc7f2a2"
+upgrade-guid = "98ef8553-be7c-4501-a640-1cf8df0aebc3"
+product-icon = "assets/icons/fivepoints_icon.ico"
+eula = false
