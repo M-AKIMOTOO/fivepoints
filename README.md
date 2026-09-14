@@ -82,10 +82,10 @@ The plots do not display grid lines. The 2D PNG is a square image with equal AZ/
 
 ## Gain calibrator flux density
 
-The repository includes the Perley & Butler (2017) flux calibrator table in
-`data/perley_butler_2017.tsv`. If a catalog calibrator and a non-catalog gain
-source are both present in completed five-point scans, the program estimates the
-gain-source flux density from the YI true-amplitude ratio:
+The Perley & Butler (2017) flux calibrator table is embedded in the program,
+so an external catalog file is not required at installation time. If a catalog
+calibrator and a non-catalog gain source are both present in completed five-point
+scans, the program estimates the gain-source flux density from the YI true-amplitude ratio:
 
 `S_gain = (YI_gain / YI_reference) * S_reference`
 
@@ -93,7 +93,7 @@ Here `S_reference` is calculated from the catalog polynomial at the selected obs
 frequency. The report prints the catalog value, the reference and gain YI true-amplitude
 means, and the resulting gain flux density from both the 1D and 2D analyses.
 
-The report also records the calibrator flux densities at 6.856 GHz and 8.448 GHz.
+The report also records the calibrator flux densities at 6.856 GHz and 8.448 GHz and prints the paper reference URL.
 
 The 1-sigma thermal-noise error of each gain flux-density estimate is calculated as the gain flux density divided by the mean center SNR.
 
