@@ -6,6 +6,8 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+const PERLEY_BUTLER_2017_CATALOG: &str = include_str!("../data/perley_butler_2017.tsv");
+
 #[derive(Debug, Clone, Copy)]
 struct GaussianParams {
     amp: f64,
@@ -90,6 +92,102 @@ struct DataRow {
 type DataMap = HashMap<(Timestamp, String), Vec<DataRow>>;
 
 #[derive(Debug, Clone)]
+struct FluxCalibrator {
+    primary_name: String,
+    aliases: Vec<String>,
+    c_ghz: f64,
+    c_jy: f64,
+    x_ghz: f64,
+    x_jy: f64,
+    k_ghz: f64,
+    k_jy: f64,
+    coefficients: [f64; 6],
+}
+
+impl FluxCalibrator {
+    fn matches_source(&self, source: &str) -> bool {
+        self.aliases
+            .iter()
+            .any(|alias| alias.eq_ignore_ascii_case(source))
+    }
+
+    fn frequency_info(&self, frequency: &str) -> Option<(f64, f64)> {
+        match frequency.to_ascii_lowercase().as_str() {
+            "c" => Some((self.c_ghz, self.c_jy)),
+            "x" => Some((self.x_ghz, self.x_jy)),
+            "k" => Some((self.k_ghz, self.k_jy)),
+            _ => None,
+        }
+    }
+
+    fn model_flux_jy(&self, frequency_ghz: f64) -> f64 {
+        let log_frequency = frequency_ghz.log10();
+        let mut log_flux = 0.0;
+        for coefficient in self.coefficients.iter().rev() {
+            log_flux = log_flux * log_frequency + coefficient;
+        }
+        10.0_f64.powf(log_flux)
+    }
+}
+
+fn parse_flux_calibrators(text: &str) -> Result<Vec<FluxCalibrator>, Box<dyn Error>> {
+    let mut calibrators = Vec::new();
+    for (line_number, line) in text.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("source_name\t") {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() != 17 {
+            return Err(format!(
+                "flux catalog line {} has {} fields; expected 17",
+                line_number + 1,
+                fields.len()
+            )
+            .into());
+        }
+        let parse = |index: usize| -> Result<f64, Box<dyn Error>> {
+            fields[index].parse::<f64>().map_err(|_| {
+                format!(
+                    "flux catalog line {}: invalid number {}",
+                    line_number + 1,
+                    fields[index]
+                )
+                .into()
+            })
+        };
+        let aliases = fields[0..3]
+            .iter()
+            .filter(|value| !value.is_empty())
+            .map(|value| (*value).to_string())
+            .collect::<Vec<_>>();
+        let mut coefficients = [0.0; 6];
+        for (i, coefficient) in coefficients.iter_mut().enumerate() {
+            *coefficient = parse(9 + i)?;
+        }
+        calibrators.push(FluxCalibrator {
+            primary_name: fields[0].to_string(),
+            aliases,
+            c_ghz: parse(3)?,
+            c_jy: parse(4)?,
+            x_ghz: parse(5)?,
+            x_jy: parse(6)?,
+            k_ghz: parse(7)?,
+            k_jy: parse(8)?,
+            coefficients,
+        });
+    }
+    Ok(calibrators)
+}
+
+fn find_flux_calibrator<'a>(
+    catalog: &'a [FluxCalibrator],
+    source: &str,
+) -> Option<&'a FluxCalibrator> {
+    catalog.iter().find(|entry| entry.matches_source(source))
+}
+
+#[derive(Debug, Clone)]
 struct ScheduleEntry {
     source: String,
     time: Timestamp,
@@ -130,7 +228,16 @@ struct ScanResult {
     source: String,
     center_time: Timestamp,
     center_amplitude: Option<f64>,
+    center_snr: Option<f64>,
+    center_mjd: Option<f64>,
     fit: Option<FitResult>,
+}
+
+#[derive(Debug, Clone)]
+struct PairResult {
+    source: String,
+    yi_1d: f64,
+    yi_2d: f64,
 }
 
 struct Cli {
@@ -143,8 +250,8 @@ struct Cli {
 
 fn usage(program: &str) -> String {
     format!(
-        "Usage: {program} --ifile DATA --skd32m SCHEDULE --skd34m SCHEDULE --frequency C|X [--output-dir DIR]\n\n\
-         Match schedule timestamps and offsets to observation data, fit 1D and 2D Gaussian beams,\n\
+        "Usage: {program} --ifile DATA --skd32m SCHEDULE --skd34m SCHEDULE --frequency C|X|K [--output-dir DIR]\n\n\
+         Match schedule timestamps and offsets to observation data, fit 1D and 2D Gaussian beams,\n         and estimate gain-source flux density from Perley & Butler 2017 calibrators.\n\
          print the comparison and save a text report and PNG plots.\n\
          Default output directory: ./five_point_result"
     )
@@ -730,11 +837,15 @@ fn process_scan(
     let rows: [Option<DataRow>; 5] = std::array::from_fn(|i| lookup(data, &scan.entries[i]));
     append_comparison(report, ant, number, scan, &rows);
     let center_amplitude = rows[1].as_ref().map(|row| row.amplitude);
+    let center_snr = rows[1].as_ref().map(|row| row.snr);
+    let center_mjd = rows[1].as_ref().map(|row| row.mjd);
     let incomplete = || ScanResult {
         number,
         source: scan.source().to_string(),
         center_time: scan.entries[1].time,
         center_amplitude,
+        center_snr,
+        center_mjd,
         fit: None,
     };
 
@@ -855,11 +966,17 @@ fn process_scan(
         source: scan.source().to_string(),
         center_time: scan.entries[1].time,
         center_amplitude,
+        center_snr,
+        center_mjd,
         fit: Some(fit),
     })
 }
 
-fn append_pairs(report: &mut String, scans32: &[ScanResult], scans34: &[ScanResult]) {
+fn append_pairs(
+    report: &mut String,
+    scans32: &[ScanResult],
+    scans34: &[ScanResult],
+) -> Vec<PairResult> {
     report.push_str("\n\n## Paired 32m/34m results\n");
     let mut sources = Vec::<String>::new();
     for scan in scans32.iter().chain(scans34.iter()) {
@@ -867,6 +984,7 @@ fn append_pairs(report: &mut String, scans32: &[ScanResult], scans34: &[ScanResu
             sources.push(scan.source.clone());
         }
     }
+    let mut pairs = Vec::new();
     for source in sources {
         let left: Vec<&ScanResult> = scans32
             .iter()
@@ -906,6 +1024,205 @@ fn append_pairs(report: &mut String, scans32: &[ScanResult], scans34: &[ScanResu
                 b.center_time,
                 yi_1d,
                 yi_2d
+            ));
+            pairs.push(PairResult {
+                source: source.clone(),
+                yi_1d,
+                yi_2d,
+            });
+        }
+    }
+    pairs
+}
+
+fn average(values: &[f64]) -> Option<f64> {
+    if values.is_empty() {
+        None
+    } else {
+        Some(values.iter().sum::<f64>() / values.len() as f64)
+    }
+}
+
+fn timestamp_tick(timestamp: Timestamp) -> i64 {
+    let seconds_per_day = 86_400_i64;
+    let days_per_year = 366_i64;
+    timestamp.year as i64 * days_per_year * seconds_per_day
+        + (timestamp.doy as i64 - 1) * seconds_per_day
+        + timestamp.seconds as i64
+}
+
+fn timestamp_from_tick(tick: f64) -> Timestamp {
+    let seconds_per_day = 86_400_i64;
+    let days_per_year = 366_i64;
+    let rounded = tick.round() as i64;
+    let year = rounded.div_euclid(days_per_year * seconds_per_day);
+    let within_year = rounded.rem_euclid(days_per_year * seconds_per_day);
+    let doy = within_year.div_euclid(seconds_per_day) + 1;
+    let seconds = within_year.rem_euclid(seconds_per_day);
+    Timestamp {
+        year: year as u16,
+        doy: doy as u16,
+        seconds: seconds as u32,
+    }
+}
+
+fn average_timestamp(values: &[Timestamp]) -> Option<Timestamp> {
+    if values.is_empty() {
+        None
+    } else {
+        let sum = values
+            .iter()
+            .map(|timestamp| timestamp_tick(*timestamp) as f64)
+            .sum::<f64>();
+        Some(timestamp_from_tick(sum / values.len() as f64))
+    }
+}
+
+fn append_gain_flux_calibration(
+    report: &mut String,
+    scans32: &[ScanResult],
+    scans34: &[ScanResult],
+    pairs: &[PairResult],
+    catalog: &[FluxCalibrator],
+    frequency: &str,
+) {
+    report.push_str("\n\n## Gain calibrator flux density\n");
+    let Some((_, _)) = catalog
+        .iter()
+        .find_map(|entry| entry.frequency_info(frequency))
+    else {
+        report.push_str(&format!(
+            "Perley & Butler 2017 flux calibration skipped: frequency '{}' is not C, X, or K\n",
+            frequency
+        ));
+        return;
+    };
+
+    let mut reference_sources = Vec::<String>::new();
+    let mut gain_sources = Vec::<String>::new();
+    for pair in pairs {
+        if find_flux_calibrator(catalog, &pair.source).is_some() {
+            if !reference_sources
+                .iter()
+                .any(|source| source == &pair.source)
+            {
+                reference_sources.push(pair.source.clone());
+            }
+        } else if !gain_sources.iter().any(|source| source == &pair.source) {
+            gain_sources.push(pair.source.clone());
+        }
+    }
+
+    if reference_sources.is_empty() {
+        report.push_str("No Perley & Butler 2017 flux calibrator was found in the completed five-point scans.\n");
+        return;
+    }
+    if gain_sources.is_empty() {
+        report
+            .push_str("No non-catalog gain source was found in the completed five-point scans.\n");
+        return;
+    }
+
+    let all_scans: Vec<&ScanResult> = scans32.iter().chain(scans34.iter()).collect();
+    for gain_source in gain_sources {
+        let gain_pairs: Vec<&PairResult> = pairs
+            .iter()
+            .filter(|pair| pair.source == gain_source)
+            .collect();
+        let gain_scans: Vec<&ScanResult> = all_scans
+            .iter()
+            .copied()
+            .filter(|scan| scan.source == gain_source)
+            .collect();
+        let gain_yi_1d = average(&gain_pairs.iter().map(|pair| pair.yi_1d).collect::<Vec<_>>());
+        let gain_yi_2d = average(&gain_pairs.iter().map(|pair| pair.yi_2d).collect::<Vec<_>>());
+        let center_snrs = gain_scans
+            .iter()
+            .filter_map(|scan| scan.center_snr)
+            .collect::<Vec<_>>();
+        let center_mjds = gain_scans
+            .iter()
+            .filter_map(|scan| scan.center_mjd)
+            .collect::<Vec<_>>();
+        let center_times = gain_scans
+            .iter()
+            .map(|scan| scan.center_time)
+            .collect::<Vec<_>>();
+        let (
+            Some(gain_yi_1d),
+            Some(gain_yi_2d),
+            Some(center_snr),
+            Some(center_mjd),
+            Some(center_time),
+        ) = (
+            gain_yi_1d,
+            gain_yi_2d,
+            average(&center_snrs),
+            average(&center_mjds),
+            average_timestamp(&center_times),
+        )
+        else {
+            continue;
+        };
+
+        for reference_source in &reference_sources {
+            let Some(reference) = find_flux_calibrator(catalog, reference_source) else {
+                continue;
+            };
+            let Some((frequency_ghz, tabulated_flux_jy)) = reference.frequency_info(frequency)
+            else {
+                continue;
+            };
+            let reference_pairs: Vec<&PairResult> = pairs
+                .iter()
+                .filter(|pair| pair.source == *reference_source)
+                .collect();
+            let reference_yi_1d = average(
+                &reference_pairs
+                    .iter()
+                    .map(|pair| pair.yi_1d)
+                    .collect::<Vec<_>>(),
+            );
+            let reference_yi_2d = average(
+                &reference_pairs
+                    .iter()
+                    .map(|pair| pair.yi_2d)
+                    .collect::<Vec<_>>(),
+            );
+            let (Some(reference_yi_1d), Some(reference_yi_2d)) = (reference_yi_1d, reference_yi_2d)
+            else {
+                continue;
+            };
+            let catalog_flux_jy = reference.model_flux_jy(frequency_ghz);
+            let gain_flux_1d = gain_yi_1d / reference_yi_1d * catalog_flux_jy;
+            let gain_flux_2d = gain_yi_2d / reference_yi_2d * catalog_flux_jy;
+            report.push_str(&format!(
+                "\ngain source={gain_source} reference flux calibrator={reference_source} ({})\n\
+                 catalog frequency = {:.3} GHz\n\
+                 catalog flux density (Perley & Butler polynomial) = {:.9} Jy\n\
+                 catalog tabulated flux density = {:.9} Jy\n\
+                 gain YI mean from 1D = {:.9}\n\
+                 gain YI mean from 2D = {:.9}\n\
+                 reference YI mean from 1D = {:.9}\n\
+                 reference YI mean from 2D = {:.9}\n\
+                 gain flux density from 1D = {:.9} Jy\n\
+                 gain flux density from 2D = {:.9} Jy\n\
+                 gain five-point center SNR mean = {:.3}\n\
+                 gain five-point center time mean = {} MJD={:.5}\n\
+                 calibration formula: S_gain = (YI_gain / YI_reference) * S_reference\n",
+                reference.primary_name,
+                frequency_ghz,
+                catalog_flux_jy,
+                tabulated_flux_jy,
+                gain_yi_1d,
+                gain_yi_2d,
+                reference_yi_1d,
+                reference_yi_2d,
+                gain_flux_1d,
+                gain_flux_2d,
+                center_snr,
+                center_time,
+                center_mjd
             ));
         }
     }
@@ -985,7 +1302,16 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
             &mut report,
         )?);
     }
-    append_pairs(&mut report, &scans32, &scans34);
+    let pairs = append_pairs(&mut report, &scans32, &scans34);
+    let catalog = parse_flux_calibrators(PERLEY_BUTLER_2017_CATALOG)?;
+    append_gain_flux_calibration(
+        &mut report,
+        &scans32,
+        &scans34,
+        &pairs,
+        &catalog,
+        &cli.frequency,
+    );
 
     let input_stem = cli
         .ifile

@@ -24,7 +24,7 @@ fivepoints_calc \
   --frequency c
 ```
 
-The value of `--frequency` is normally `c` or `x`. The default output directory is `./five_point_result`; use `--output-dir` to change it.
+The value of `--frequency` is normally `c`, `x`, or `k`. The default output directory is `./five_point_result`; use `--output-dir` to change it.
 
 ```bash
 fivepoints_calc \
@@ -79,6 +79,23 @@ I(x,y) = A
 ```
 
 The plots do not display grid lines. The 2D PNG is a square image with equal AZ/EL pixel scales, so an observed circular beam is drawn as a circle. An ellipse in the figure therefore represents the fitted difference between sigma_AZ and sigma_EL, rather than display distortion. Every graph PNG is passed through imagequant 4.4.1 with its default attributes before it is saved.
+
+## Gain calibrator flux density
+
+The repository includes the Perley & Butler (2017) flux calibrator table in
+`data/perley_butler_2017.tsv`. If a catalog calibrator and a non-catalog gain
+source are both present in completed five-point scans, the program estimates the
+gain-source flux density from the YI true-amplitude ratio:
+
+`S_gain = (YI_gain / YI_reference) * S_reference`
+
+Here `S_reference` is calculated from the catalog polynomial at the selected observing
+frequency. The report prints the catalog value, the reference and gain YI true-amplitude
+means, and the resulting gain flux density from both the 1D and 2D analyses.
+
+The gain-source five-point center SNR and time are also reported as the arithmetic means
+over all completed 32m and 34m five-point scans for that source. The time line includes
+both the schedule timestamp and its MJD.
 
 ## Derivation of antenna true amplitude
 
