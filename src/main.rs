@@ -1196,6 +1196,8 @@ fn append_gain_flux_calibration(
             let catalog_flux_jy = reference.model_flux_jy(frequency_ghz);
             let gain_flux_1d = gain_yi_1d / reference_yi_1d * catalog_flux_jy;
             let gain_flux_2d = gain_yi_2d / reference_yi_2d * catalog_flux_jy;
+            let gain_flux_error_1d = gain_flux_1d / center_snr;
+            let gain_flux_error_2d = gain_flux_2d / center_snr;
             report.push_str(&format!(
                 "\ngain source={gain_source} reference flux calibrator={reference_source} ({})\n\
                  flux calibrator flux density at {:.3} GHz = {:.9} Jy\n\
@@ -1208,10 +1210,13 @@ fn append_gain_flux_calibration(
                  reference YI mean from 1D = {:.9}\n\
                  reference YI mean from 2D = {:.9}\n\
                  gain flux density from 1D = {:.9} Jy\n\
+                 gain flux density thermal error from 1D (1-sigma) = {:.9} Jy\n\
                  gain flux density from 2D = {:.9} Jy\n\
+                 gain flux density thermal error from 2D (1-sigma) = {:.9} Jy\n\
                  gain five-point center SNR mean = {:.3}\n\
                  gain five-point center time mean = {} MJD={:.5}\n\
-                 calibration formula: S_gain = (YI_gain / YI_reference) * S_reference\n",
+                 calibration formula: S_gain = (YI_gain / YI_reference) * S_reference\n\
+                 thermal error formula: sigma_S = S_gain / mean center SNR\n",
                 reference.primary_name,
                 reference.c_ghz,
                 reference.c_jy,
@@ -1225,7 +1230,9 @@ fn append_gain_flux_calibration(
                 reference_yi_1d,
                 reference_yi_2d,
                 gain_flux_1d,
+                gain_flux_error_1d,
                 gain_flux_2d,
+                gain_flux_error_2d,
                 center_snr,
                 center_time,
                 center_mjd

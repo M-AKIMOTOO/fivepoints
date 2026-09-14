@@ -95,6 +95,8 @@ means, and the resulting gain flux density from both the 1D and 2D analyses.
 
 The report also records the calibrator flux densities at 6.856 GHz and 8.448 GHz.
 
+The 1-sigma thermal-noise error of each gain flux-density estimate is calculated as the gain flux density divided by the mean center SNR.
+
 The gain-source five-point center SNR and time are also reported as the arithmetic means
 over all completed 32m and 34m five-point scans for that source. The time line includes
 both the schedule timestamp and its MJD.
