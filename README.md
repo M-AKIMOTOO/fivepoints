@@ -93,6 +93,8 @@ Here `S_reference` is calculated from the catalog polynomial at the selected obs
 frequency. The report prints the catalog value, the reference and gain YI true-amplitude
 means, and the resulting gain flux density from both the 1D and 2D analyses.
 
+The report also records the calibrator flux densities at 6.856 GHz and 8.448 GHz.
+
 The gain-source five-point center SNR and time are also reported as the arithmetic means
 over all completed 32m and 34m five-point scans for that source. The time line includes
 both the schedule timestamp and its MJD.

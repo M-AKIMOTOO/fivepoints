@@ -1198,6 +1198,8 @@ fn append_gain_flux_calibration(
             let gain_flux_2d = gain_yi_2d / reference_yi_2d * catalog_flux_jy;
             report.push_str(&format!(
                 "\ngain source={gain_source} reference flux calibrator={reference_source} ({})\n\
+                 flux calibrator flux density at {:.3} GHz = {:.9} Jy\n\
+                 flux calibrator flux density at {:.3} GHz = {:.9} Jy\n\
                  catalog frequency = {:.3} GHz\n\
                  catalog flux density (Perley & Butler polynomial) = {:.9} Jy\n\
                  catalog tabulated flux density = {:.9} Jy\n\
@@ -1211,6 +1213,10 @@ fn append_gain_flux_calibration(
                  gain five-point center time mean = {} MJD={:.5}\n\
                  calibration formula: S_gain = (YI_gain / YI_reference) * S_reference\n",
                 reference.primary_name,
+                reference.c_ghz,
+                reference.c_jy,
+                reference.x_ghz,
+                reference.x_jy,
                 frequency_ghz,
                 catalog_flux_jy,
                 tabulated_flux_jy,
