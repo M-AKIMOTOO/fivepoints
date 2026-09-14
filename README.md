@@ -90,16 +90,19 @@ scans, the program estimates the gain-source flux density from the YI true-ampli
 `S_gain = (YI_gain / YI_reference) * S_reference`
 
 Here `S_reference` is calculated from the catalog polynomial at the selected observing
-frequency. The report prints the catalog value, the reference and gain YI true-amplitude
-means, and the resulting gain flux density from both the 1D and 2D analyses.
+frequency. The report calculates the gain flux density separately for each
+32m/34m pair by matching the same pair number in the gain source and reference
+calibrator. It prints the pair-specific YI true amplitudes and the resulting gain
+flux density from both the 1D and 2D analyses. If only one calibrator pair is
+available, that reference pair is reused for each gain pair.
 
 The report also records the calibrator flux densities at 6.856 GHz and 8.448 GHz and prints the paper reference URL.
 
 The 1-sigma thermal-noise error of each gain flux-density estimate is calculated as the gain flux density divided by the mean center SNR.
 
-The gain-source five-point center SNR and time are also reported as the arithmetic means
-over all completed 32m and 34m five-point scans for that source. The time line includes
-both the schedule timestamp and its MJD.
+The gain-source five-point center SNR and time are reported for each pair as the
+arithmetic means of its 32m and 34m center values. The time line includes both the
+schedule timestamp and its MJD.
 
 ## Derivation of antenna true amplitude
 

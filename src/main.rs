@@ -259,6 +259,15 @@ struct ScanResult {
 #[derive(Debug, Clone)]
 struct PairResult {
     source: String,
+    pair_number: usize,
+    scan32_number: usize,
+    scan34_number: usize,
+    center_time_32: Timestamp,
+    center_time_34: Timestamp,
+    center_snr_32: Option<f64>,
+    center_snr_34: Option<f64>,
+    center_mjd_32: Option<f64>,
+    center_mjd_34: Option<f64>,
     yi_1d: f64,
     yi_2d: f64,
 }
@@ -1050,20 +1059,21 @@ fn append_pairs(
             ));
             pairs.push(PairResult {
                 source: source.clone(),
+                pair_number: i + 1,
+                scan32_number: a.number,
+                scan34_number: b.number,
+                center_time_32: a.center_time,
+                center_time_34: b.center_time,
+                center_snr_32: a.center_snr,
+                center_snr_34: b.center_snr,
+                center_mjd_32: a.center_mjd,
+                center_mjd_34: b.center_mjd,
                 yi_1d,
                 yi_2d,
             });
         }
     }
     pairs
-}
-
-fn average(values: &[f64]) -> Option<f64> {
-    if values.is_empty() {
-        None
-    } else {
-        Some(values.iter().sum::<f64>() / values.len() as f64)
-    }
 }
 
 fn timestamp_tick(timestamp: Timestamp) -> i64 {
@@ -1103,8 +1113,6 @@ fn average_timestamp(values: &[Timestamp]) -> Option<Timestamp> {
 
 fn append_gain_flux_calibration(
     report: &mut String,
-    scans32: &[ScanResult],
-    scans34: &[ScanResult],
     pairs: &[PairResult],
     catalog: &[FluxCalibrator],
     frequency: &str,
@@ -1142,7 +1150,9 @@ fn append_gain_flux_calibration(
     }
 
     if reference_sources.is_empty() {
-        report.push_str("No Perley & Butler 2017 flux calibrator was found in the completed five-point scans.\n");
+        report.push_str(
+            "No Perley & Butler 2017 flux calibrator was found in the completed five-point scans.\n",
+        );
         return;
     }
     if gain_sources.is_empty() {
@@ -1151,120 +1161,107 @@ fn append_gain_flux_calibration(
         return;
     }
 
-    let all_scans: Vec<&ScanResult> = scans32.iter().chain(scans34.iter()).collect();
     for gain_source in gain_sources {
         let gain_pairs: Vec<&PairResult> = pairs
             .iter()
             .filter(|pair| pair.source == gain_source)
             .collect();
-        let gain_scans: Vec<&ScanResult> = all_scans
-            .iter()
-            .copied()
-            .filter(|scan| scan.source == gain_source)
-            .collect();
-        let gain_yi_1d = average(&gain_pairs.iter().map(|pair| pair.yi_1d).collect::<Vec<_>>());
-        let gain_yi_2d = average(&gain_pairs.iter().map(|pair| pair.yi_2d).collect::<Vec<_>>());
-        let center_snrs = gain_scans
-            .iter()
-            .filter_map(|scan| scan.center_snr)
-            .collect::<Vec<_>>();
-        let center_mjds = gain_scans
-            .iter()
-            .filter_map(|scan| scan.center_mjd)
-            .collect::<Vec<_>>();
-        let center_times = gain_scans
-            .iter()
-            .map(|scan| scan.center_time)
-            .collect::<Vec<_>>();
-        let (
-            Some(gain_yi_1d),
-            Some(gain_yi_2d),
-            Some(center_snr),
-            Some(center_mjd),
-            Some(center_time),
-        ) = (
-            gain_yi_1d,
-            gain_yi_2d,
-            average(&center_snrs),
-            average(&center_mjds),
-            average_timestamp(&center_times),
-        )
-        else {
-            continue;
-        };
 
-        for reference_source in &reference_sources {
-            let Some(reference) = find_flux_calibrator(catalog, reference_source) else {
+        for gain_pair in gain_pairs {
+            let (Some(snr32), Some(snr34), Some(mjd32), Some(mjd34)) = (
+                gain_pair.center_snr_32,
+                gain_pair.center_snr_34,
+                gain_pair.center_mjd_32,
+                gain_pair.center_mjd_34,
+            ) else {
                 continue;
             };
-            let Some((frequency_ghz, tabulated_flux_jy)) = reference.frequency_info(frequency)
+            let center_snr = (snr32 + snr34) / 2.0;
+            let center_mjd = (mjd32 + mjd34) / 2.0;
+            let Some(center_time) =
+                average_timestamp(&[gain_pair.center_time_32, gain_pair.center_time_34])
             else {
                 continue;
             };
-            let reference_pairs: Vec<&PairResult> = pairs
-                .iter()
-                .filter(|pair| pair.source == *reference_source)
-                .collect();
-            let reference_yi_1d = average(
-                &reference_pairs
-                    .iter()
-                    .map(|pair| pair.yi_1d)
-                    .collect::<Vec<_>>(),
-            );
-            let reference_yi_2d = average(
-                &reference_pairs
-                    .iter()
-                    .map(|pair| pair.yi_2d)
-                    .collect::<Vec<_>>(),
-            );
-            let (Some(reference_yi_1d), Some(reference_yi_2d)) = (reference_yi_1d, reference_yi_2d)
-            else {
+            if center_snr <= 0.0 {
                 continue;
-            };
-            let catalog_flux_jy = reference.model_flux_jy(frequency_ghz);
-            let gain_flux_1d = gain_yi_1d / reference_yi_1d * catalog_flux_jy;
-            let gain_flux_2d = gain_yi_2d / reference_yi_2d * catalog_flux_jy;
-            let gain_flux_error_1d = gain_flux_1d / center_snr;
-            let gain_flux_error_2d = gain_flux_2d / center_snr;
-            report.push_str(&format!(
-                "\ngain source={gain_source} reference flux calibrator={reference_source} ({})\n\
-                 flux calibrator flux density at {:.3} GHz = {:.9} Jy\n\
-                 flux calibrator flux density at {:.3} GHz = {:.9} Jy\n\
-                 catalog frequency = {:.3} GHz\n\
-                 catalog flux density (Perley & Butler polynomial) = {:.9} Jy\n\
-                 catalog tabulated flux density = {:.9} Jy\n\
-                 gain YI mean from 1D = {:.9}\n\
-                 gain YI mean from 2D = {:.9}\n\
-                 reference YI mean from 1D = {:.9}\n\
-                 reference YI mean from 2D = {:.9}\n\
-                 gain flux density from 1D = {:.9} Jy\n\
-                 gain flux density thermal error from 1D (1-sigma) = {:.9} Jy\n\
-                 gain flux density from 2D = {:.9} Jy\n\
-                 gain flux density thermal error from 2D (1-sigma) = {:.9} Jy\n\
-                 gain five-point center SNR mean = {:.3}\n\
-                 gain five-point center time mean = {} MJD={:.5}\n\
-                 calibration formula: S_gain = (YI_gain / YI_reference) * S_reference\n\
-                 thermal error formula: sigma_S = S_gain / mean center SNR\n",
-                reference.primary_name,
-                reference.c_ghz,
-                reference.c_jy,
-                reference.x_ghz,
-                reference.x_jy,
-                frequency_ghz,
-                catalog_flux_jy,
-                tabulated_flux_jy,
-                gain_yi_1d,
-                gain_yi_2d,
-                reference_yi_1d,
-                reference_yi_2d,
-                gain_flux_1d,
-                gain_flux_error_1d,
-                gain_flux_2d,
-                gain_flux_error_2d,
-                center_snr,
-                center_time,
-                center_mjd
-            ));
+            }
+
+            for reference_source in &reference_sources {
+                let reference_pairs: Vec<&PairResult> = pairs
+                    .iter()
+                    .filter(|pair| pair.source == *reference_source)
+                    .collect();
+                let Some(reference_pair) = reference_pairs
+                    .iter()
+                    .copied()
+                    .find(|pair| pair.pair_number == gain_pair.pair_number)
+                    .or_else(|| (reference_pairs.len() == 1).then(|| reference_pairs[0]))
+                else {
+                    continue;
+                };
+                let Some(reference) = find_flux_calibrator(catalog, reference_source) else {
+                    continue;
+                };
+                let Some((frequency_ghz, tabulated_flux_jy)) = reference.frequency_info(frequency)
+                else {
+                    continue;
+                };
+
+                let catalog_flux_jy = reference.model_flux_jy(frequency_ghz);
+                let gain_flux_1d = gain_pair.yi_1d / reference_pair.yi_1d * catalog_flux_jy;
+                let gain_flux_2d = gain_pair.yi_2d / reference_pair.yi_2d * catalog_flux_jy;
+                let gain_flux_error_1d = gain_flux_1d / center_snr;
+                let gain_flux_error_2d = gain_flux_2d / center_snr;
+                report.push_str(&format!(
+                    "\ngain source={gain_source} pair={} reference flux calibrator={} ({})\n\
+                     gain pair: 32m #{} ({}) + 34m #{} ({})\n\
+                     reference pair number = {}\n\
+                     flux calibrator flux density at {:.3} GHz = {:.9} Jy\n\
+                     flux calibrator flux density at {:.3} GHz = {:.9} Jy\n\
+                     catalog frequency = {:.3} GHz\n\
+                     catalog flux density (Perley & Butler polynomial) = {:.9} Jy\n\
+                     catalog tabulated flux density = {:.9} Jy\n\
+                     gain YI true amplitude from 1D = {:.9}\n\
+                     reference YI true amplitude from 1D = {:.9}\n\
+                     gain YI true amplitude from 2D = {:.9}\n\
+                     reference YI true amplitude from 2D = {:.9}\n\
+                     gain flux density from 1D = {:.9} Jy\n\
+                     gain flux density thermal error from 1D (1-sigma) = {:.9} Jy\n\
+                     gain flux density from 2D = {:.9} Jy\n\
+                     gain flux density thermal error from 2D (1-sigma) = {:.9} Jy\n\
+                     gain five-point center SNR mean = {:.3}\n\
+                     gain five-point center time mean = {} MJD={:.5}\n\
+                     calibration formula: S_gain = (YI_gain / YI_reference) * S_reference\n\
+                     thermal error formula: sigma_S = S_gain / pair center SNR mean\n",
+                    gain_pair.pair_number,
+                    reference_source,
+                    reference.primary_name,
+                    gain_pair.scan32_number,
+                    gain_pair.center_time_32,
+                    gain_pair.scan34_number,
+                    gain_pair.center_time_34,
+                    reference_pair.pair_number,
+                    reference.c_ghz,
+                    reference.c_jy,
+                    reference.x_ghz,
+                    reference.x_jy,
+                    frequency_ghz,
+                    catalog_flux_jy,
+                    tabulated_flux_jy,
+                    gain_pair.yi_1d,
+                    reference_pair.yi_1d,
+                    gain_pair.yi_2d,
+                    reference_pair.yi_2d,
+                    gain_flux_1d,
+                    gain_flux_error_1d,
+                    gain_flux_2d,
+                    gain_flux_error_2d,
+                    center_snr,
+                    center_time,
+                    center_mjd
+                ));
+            }
         }
     }
 }
@@ -1345,14 +1342,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn Error>> {
     }
     let pairs = append_pairs(&mut report, &scans32, &scans34);
     let catalog = parse_flux_calibrators(PERLEY_BUTLER_2017_CATALOG)?;
-    append_gain_flux_calibration(
-        &mut report,
-        &scans32,
-        &scans34,
-        &pairs,
-        &catalog,
-        &cli.frequency,
-    );
+    append_gain_flux_calibration(&mut report, &pairs, &catalog, &cli.frequency);
 
     let input_stem = cli
         .ifile
