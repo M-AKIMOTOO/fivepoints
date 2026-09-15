@@ -179,24 +179,25 @@ The current two-dimensional model is axis-aligned and has no AZ/EL correlation t
 ## Gain-source light curve
 
 Use `scripts/plot_gain_lightcurve.py` to read multiple fivepoints text reports
-and plot the gain-source flux density against the pair-center MJD. The script
-uses the pair-specific 1-sigma thermal errors from the reports. If C and X
-reports are supplied together, they are plotted as separate frequency series.
+and plot the gain-source flux density against the pair-center MJD. Pass C-band
+reports with `--cdata` and X-band reports with `--xdata`; both frequency
+series are plotted together when both are supplied. The script uses the
+pair-specific 1-sigma thermal errors from the reports.
 
 ```bash
 python3 scripts/plot_gain_lightcurve.py \
-  five_point_result/I26191F_c/*.txt \
-  five_point_result/I26204F_c/*.txt \
-  --source J1041+536 \
-  --frequency C \
-  --output five_point_result/J1041+536_C_lightcurve.png \
-  --data-output five_point_result/J1041+536_C_lightcurve_data.tsv
+  --cdata five_point_result/I*F_c/*_five_point_result.txt \
+  --xdata five_point_result/I*F_x/*_five_point_result.txt \
+  --source J1041+536
 ```
 
 The default `--fit` is `1d`; use `--fit 2d` or `--fit both` to select
-another result. The plot has no grid lines. The data used for the plot are
-also saved as a tab-separated text file. Set `--data-output` to choose its
-path; otherwise `<PNG stem>_data.tsv` is used.
+another result. The plot has no grid lines and connects data points with dotted
+lines. The default PNG is `five_point_result/<source>_cx_lc.png`; for example,
+`J1041+536` produces `five_point_result/J1041+536_cx_lc.png`. The data
+used for the plot are also saved as a tab-separated text file at
+`five_point_result/<source>_cx_lc_data.tsv`. Set `--output` or
+`--data-output` to choose different paths.
 
 ## Verification
 

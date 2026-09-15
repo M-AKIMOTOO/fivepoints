@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
-"""Plot a gain-source light curve from one or more fivepoints text reports.
+"""Plot a gain-source light curve from C/X fivepoints text reports.
 
 Example:
     python3 scripts/plot_gain_lightcurve.py \
-        five_point_result/I26191F_c/*.txt \
-        five_point_result/I26204F_c/*.txt \
-        --source J1041+536 \
-        --fit 1d \
-        --output five_point_result/J1041+536_c_lightcurve.png
+        --cdata five_point_result/I*F_c/*_five_point_result.txt \
+        --xdata five_point_result/I*F_x/*_five_point_result.txt \
+        --source J1041+536
 """
 
 from __future__ import annotations
@@ -56,6 +54,10 @@ def source_key(source: str) -> str:
     if key.startswith("j"):
         key = key[1:]
     return key
+
+
+def source_filename(source: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.+-]+", "_", source)
 
 
 def number_from_line(line: str, prefix: str, report: Path) -> float | None:
@@ -151,19 +153,23 @@ def parse_args() -> argparse.Namespace:
         description="Plot a gain-source light curve from fivepoints text reports."
     )
     parser.add_argument(
-        "reports",
+        "--cdata",
         nargs="+",
         type=Path,
-        help="fivepoints text report files",
+        default=[],
+        help="C-band fivepoints text report files",
+    )
+    parser.add_argument(
+        "--xdata",
+        nargs="+",
+        type=Path,
+        default=[],
+        help="X-band fivepoints text report files",
     )
     parser.add_argument(
         "--source",
         default="J1041+536",
         help="gain source to plot; 1041+536 and J1041+536 are equivalent",
-    )
-    parser.add_argument(
-        "--frequency",
-        help="plot only this frequency, for example C or X; default: plot each frequency separately",
     )
     parser.add_argument(
         "--fit",
@@ -174,8 +180,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("five_point_result/gain_lightcurve.png"),
-        help="output PNG path",
+        help="output PNG path; default: five_point_result/<source>_cx_lc.png",
     )
     parser.add_argument(
         "--data-output",
@@ -232,31 +237,35 @@ def write_plot_data(
 def main() -> int:
     args = parse_args()
     wanted_source = source_key(args.source)
-    wanted_frequency = args.frequency.upper() if args.frequency else None
+
+    if not args.cdata and not args.xdata:
+        print("error: --cdata or --xdata is required", file=sys.stderr)
+        return 2
 
     points: list[GainPoint] = []
-    for report in args.reports:
-        if not report.is_file():
-            print(f"error: report does not exist: {report}", file=sys.stderr)
-            return 2
-        try:
-            points.extend(parse_report(report))
-        except ValueError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 2
+    for expected_frequency, reports in (("C", args.cdata), ("X", args.xdata)):
+        for report in reports:
+            if not report.is_file():
+                print(f"error: report does not exist: {report}", file=sys.stderr)
+                return 2
+            try:
+                parsed_points = parse_report(report)
+            except ValueError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 2
+            if any(point.frequency != expected_frequency for point in parsed_points):
+                print(
+                    f"error: {report} is not a {expected_frequency}-band report",
+                    file=sys.stderr,
+                )
+                return 2
+            points.extend(parsed_points)
 
     points = [
-        point
-        for point in points
-        if source_key(point.source) == wanted_source
-        and (wanted_frequency is None or point.frequency == wanted_frequency)
+        point for point in points if source_key(point.source) == wanted_source
     ]
     if not points:
-        print(
-            f"error: no gain pairs found for source {args.source}"
-            + (f" at frequency {wanted_frequency}" if wanted_frequency else ""),
-            file=sys.stderr,
-        )
+        print(f"error: no gain pairs found for source {args.source}", file=sys.stderr)
         return 2
 
     groups: dict[str, list[GainPoint]] = defaultdict(list)
@@ -266,12 +275,15 @@ def main() -> int:
     fig, ax = plt.subplots(figsize=(8.0, 5.0))
     colors = plt.get_cmap("tab10")
     fit_specs = {
-        "1d": ("1D", "o", "-"),
-        "2d": ("2D", "s", "--"),
+        "1d": ("1D", "o", ":"),
+        "2d": ("2D", "s", ":"),
     }
     selected_fits = ("1d", "2d") if args.fit == "both" else (args.fit,)
-    data_output = args.data_output or args.output.with_name(
-        f"{args.output.stem}_data.tsv"
+    output = args.output or (
+        Path("five_point_result") / f"{source_filename(args.source)}_cx_lc.png"
+    )
+    data_output = args.data_output or output.with_name(
+        f"{output.stem}_data.tsv"
     )
     write_plot_data(data_output, points, selected_fits)
 
@@ -307,8 +319,8 @@ def main() -> int:
     ax.legend()
     fig.tight_layout()
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(args.output, dpi=args.dpi)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, dpi=args.dpi)
     plt.close(fig)
 
     for point in sorted(points, key=lambda item: (item.mjd, item.frequency, item.pair)):
@@ -319,7 +331,7 @@ def main() -> int:
             f"flux2d={point.flux_2d:.9f}+-{point.error_2d:.9f} Jy "
             f"source={point.source} report={point.report}"
         )
-    print(f"saved plot: {args.output}")
+    print(f"saved plot: {output}")
     print(f"saved plot data: {data_output}")
     return 0
 
