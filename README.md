@@ -176,6 +176,26 @@ A_true = 0.047631273 * 0.046162930 / 0.046160000
 
 The current two-dimensional model is axis-aligned and has no AZ/EL correlation term. With these five points, its peak `A` is algebraically identical to the true amplitude calculated above. A rotated or correlated two-dimensional Gaussian requires additional observation points.
 
+## Gain-source light curve
+
+Use `scripts/plot_gain_lightcurve.py` to read multiple fivepoints text reports
+and plot the gain-source flux density against the pair-center MJD. The script
+uses the pair-specific 1-sigma thermal errors from the reports. If C and X
+reports are supplied together, they are plotted as separate frequency series.
+
+```bash
+python3 scripts/plot_gain_lightcurve.py \
+  five_point_result/I26191F_c/*.txt \
+  five_point_result/I26204F_c/*.txt \
+  --source J1041+536 \
+  --frequency C \
+  --fit both \
+  --output five_point_result/J1041+536_C_lightcurve.png
+```
+
+Use `--fit 1d` or `--fit 2d` to plot one result. The default
+`both` plots both Gaussian results, and the plot has no grid lines.
+
 ## Verification
 
 ```bash
