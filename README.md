@@ -189,12 +189,14 @@ python3 scripts/plot_gain_lightcurve.py \
   five_point_result/I26204F_c/*.txt \
   --source J1041+536 \
   --frequency C \
-  --fit both \
-  --output five_point_result/J1041+536_C_lightcurve.png
+  --output five_point_result/J1041+536_C_lightcurve.png \
+  --data-output five_point_result/J1041+536_C_lightcurve_data.tsv
 ```
 
-Use `--fit 1d` or `--fit 2d` to plot one result. The default
-`both` plots both Gaussian results, and the plot has no grid lines.
+The default `--fit` is `1d`; use `--fit 2d` or `--fit both` to select
+another result. The plot has no grid lines. The data used for the plot are
+also saved as a tab-separated text file. Set `--data-output` to choose its
+path; otherwise `<PNG stem>_data.tsv` is used.
 
 ## Verification
 

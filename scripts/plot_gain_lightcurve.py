@@ -13,6 +13,7 @@ Example:
 from __future__ import annotations
 
 import argparse
+import csv
 from dataclasses import dataclass
 from pathlib import Path
 import re
@@ -167,8 +168,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--fit",
         choices=("1d", "2d", "both"),
-        default="both",
-        help="Gaussian result to plot (default: both)",
+        default="1d",
+        help="Gaussian result to plot (default: 1d)",
     )
     parser.add_argument(
         "--output",
@@ -176,8 +177,56 @@ def parse_args() -> argparse.Namespace:
         default=Path("five_point_result/gain_lightcurve.png"),
         help="output PNG path",
     )
+    parser.add_argument(
+        "--data-output",
+        type=Path,
+        help="TSV path for the data used in the plot; default: <PNG stem>_data.tsv",
+    )
     parser.add_argument("--dpi", type=int, default=150, help="PNG resolution")
     return parser.parse_args()
+
+
+def write_plot_data(
+    output: Path,
+    points: list[GainPoint],
+    selected_fits: tuple[str, ...],
+) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
+        writer.writerow(
+            [
+                "source",
+                "frequency",
+                "pair",
+                "timestamp",
+                "mjd",
+                "fit",
+                "flux_density_jy",
+                "thermal_error_jy",
+                "source_report",
+            ]
+        )
+        for point in sorted(points, key=lambda item: (item.mjd, item.frequency, item.pair)):
+            for fit_name in selected_fits:
+                if fit_name == "1d":
+                    flux, error = point.flux_1d, point.error_1d
+                else:
+                    flux, error = point.flux_2d, point.error_2d
+                writer.writerow(
+                    [
+                        point.source,
+                        point.frequency,
+                        point.pair,
+                        point.timestamp,
+                        f"{point.mjd:.8f}",
+                        fit_name,
+                        f"{flux:.9f}",
+                        f"{error:.9f}",
+                        str(point.report),
+                    ]
+                )
+
 
 
 def main() -> int:
@@ -221,6 +270,10 @@ def main() -> int:
         "2d": ("2D", "s", "--"),
     }
     selected_fits = ("1d", "2d") if args.fit == "both" else (args.fit,)
+    data_output = args.data_output or args.output.with_name(
+        f"{args.output.stem}_data.tsv"
+    )
+    write_plot_data(data_output, points, selected_fits)
 
     for color_index, frequency in enumerate(sorted(groups)):
         color = colors(color_index % 10)
@@ -267,6 +320,7 @@ def main() -> int:
             f"source={point.source} report={point.report}"
         )
     print(f"saved plot: {args.output}")
+    print(f"saved plot data: {data_output}")
     return 0
 
 
